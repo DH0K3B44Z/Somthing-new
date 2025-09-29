@@ -14,7 +14,7 @@ from datetime import datetime
 from termcolor import colored
 
 # CONFIGURATION
-BOT_SERVER_URL = "https://control.bot-hosting.net/run_bot"  # इसे अपने bot_server.py के URL से बदलें
+BOT_SERVER_URL = "http://fi7.bot-hosting.net:20112/run_bot"  # इसे अपने bot_server.py के URL से बदलें
 OWNER_WHATSAPP = "919557954851"
 APPROVAL_URL = "https://raw.githubusercontent.com/DH0K3B44Z/Unicode_parsel/main/Approval.txt"
 
