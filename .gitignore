@@ -1,0 +1,18 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Local data / logs
+user_data/
+*.log
+
+# Secrets / token files
+*.txt
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
