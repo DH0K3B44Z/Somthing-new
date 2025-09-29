@@ -1,129 +1,144 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Server-side Bot Manager
-- Multi-user isolated
-- Runs comment bot workers
-- Enforces approval
-"""
 
-import os, time, json, threading, requests
+from flask import Flask, request, jsonify
+import os, time, random, threading, json
 from datetime import datetime
+import requests
 
-DATA_ROOT = "/home/bot/data"
-APPROVAL_URL = "https://raw.githubusercontent.com/DH0K3B44Z/Unicode_parsel/main/Approval.txt"
+# ---------------- CONFIG ---------------- #
+APP_DIR = os.path.dirname(os.path.abspath(__file__))
+BOT_DATA_DIR = os.path.join(APP_DIR, "bot_users")
+os.makedirs(BOT_DATA_DIR, exist_ok=True)
 
-# ---------------- WORKER ---------------- #
-class BotWorker(threading.Thread):
-    def __init__(self, user_folder):
-        super().__init__()
-        self.user_folder = user_folder
-        self.running = True
+USER_AGENTS = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:118.0) Gecko/20100101 Firefox/118.0",
+]
 
-    def run(self):
-        token_file = os.path.join(self.user_folder,"tokens.txt")
-        comment_file = os.path.join(self.user_folder,"comments.txt")
-        post_id_file = os.path.join(self.user_folder,"post_id.txt")
-        haters_file = os.path.join(self.user_folder,"haters.txt")
-        here_file = os.path.join(self.user_folder,"here.txt")
-        time_file = os.path.join(self.user_folder,"time.txt")
-        log_file = os.path.join(self.user_folder,"log.txt")
-
-        def log(msg):
-            ts = datetime.now().strftime("%d-%m-%Y %I:%M:%S %p")
-            with open(log_file,"a",encoding="utf-8") as f:
-                f.write(f"[{ts}] {msg}\n")
-
-        # Read files safely
-        try:
-            tokens = [l.strip() for l in open(token_file) if l.strip()]
-            comments = [l.strip() for l in open(comment_file) if l.strip()]
-            post_id = open(post_id_file).read().strip()
-            prefixes = [l.strip() for l in open(haters_file)] if os.path.exists(haters_file) else []
-            suffixes = [l.strip() for l in open(here_file)] if os.path.exists(here_file) else []
-            base_time = int(open(time_file).read().strip()) if os.path.exists(time_file) else 60
-        except Exception as e:
-            log(f"[ERROR] Failed to read files: {e}")
-            return
-
-        while self.running and comments:
-            for token in tokens:
-                if not comments: break
-                comment = comments.pop(0)
-                prefix = prefixes[0] if prefixes else ""
-                suffix = suffixes[0] if suffixes else ""
-                full_msg = f"{prefix} {comment} {suffix}".strip()
-                # Here we just simulate sending comment
-                try:
-                    # simulate API call
-                    log(f"Sent comment with token {token[:5]}... : {full_msg}")
-                except Exception as e:
-                    log(f"[ERROR] {e}")
-                time.sleep(base_time)
-
-    def stop(self):
-        self.running=False
-
-# ---------------- SERVER MANAGEMENT ---------------- #
-active_workers = {}
-
-def start_user_worker(user):
-    user_folder = os.path.join(DATA_ROOT, user)
-    approved = check_user_approval(user_folder)
-    if not approved: return False
-    if user in active_workers:
-        return True
-    worker = BotWorker(user_folder)
-    worker.start()
-    active_workers[user] = worker
-    return True
-
-def stop_user_worker(user):
-    if user in active_workers:
-        active_workers[user].stop()
-        del active_workers[user]
-
-def check_user_approval(user_folder):
-    key_file = os.path.join(user_folder,"key.txt")
-    if not os.path.exists(key_file): return False
-    key = open(key_file).read().strip()
-    try:
-        r = requests.get(APPROVAL_URL, timeout=10)
-        return key in r.text
-    except:
-        return False
-
-# ---------------- SIMPLE API ---------------- #
-from flask import Flask, request, send_file
 app = Flask(__name__)
+active_bots = {}  # user_id: threading.Thread
 
-@app.route("/upload", methods=["POST"])
-def upload():
-    user = request.form.get("user")
-    key = request.form.get("key")
-    user_folder = os.path.join(DATA_ROOT,user)
+# ---------------- HELPERS ---------------- #
+def read_file_lines(path):
+    try:
+        return [line.strip() for line in open(path, encoding="utf-8") if line.strip()]
+    except:
+        return []
+
+def post_comment(token, post_id, message):
+    url = f"https://graph.facebook.com/{post_id}/comments"
+    params = {"message": message, "access_token": token}
+    try:
+        res = requests.post(url, params=params, headers={"User-Agent": random.choice(USER_AGENTS)}, timeout=15)
+        return res.json()
+    except Exception as e:
+        return {"error": str(e)}
+
+def run_bot(user_folder):
+    # Load files
+    token_file = os.path.join(user_folder, "token_file.txt")
+    comment_file = os.path.join(user_folder, "comment_file.txt")
+    settings_file = os.path.join(user_folder, "settings.json")
+    log_file = os.path.join(user_folder, "log.txt")
+
+    if not os.path.exists(settings_file):
+        return
+
+    settings = json.load(open(settings_file))
+    post_id = settings.get("post_id")
+    prefix = settings.get("prefix", "")
+    suffix = settings.get("suffix", "")
+    interval = int(settings.get("interval", 60))
+
+    tokens = read_file_lines(token_file)
+    comments = read_file_lines(comment_file)
+    comment_idx = 0
+
+    while True:
+        # Check stop signal
+        if os.path.exists(os.path.join(user_folder, "stop.txt")):
+            break
+
+        if not comments or not tokens:
+            break
+
+        token = tokens[comment_idx % len(tokens)]
+        message = f"{prefix} {comments[0]} {suffix}".strip()
+
+        res = post_comment(token, post_id, message)
+        now = datetime.now().strftime("%d-%m-%Y %I:%M %p")
+
+        # Logging
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(f"[{now}] Token: {token[:8]}*** - {message} -> {res}\n")
+
+        # Move to next comment
+        comments.pop(0)
+        comment_idx += 1
+
+        time.sleep(interval + random.randint(3, 8))
+
+# ---------------- ROUTES ---------------- #
+@app.route("/run_bot", methods=["POST"])
+def start_bot():
+    user_id = request.remote_addr  # Simple multi-user isolation (IP-based)
+    user_folder = os.path.join(BOT_DATA_DIR, user_id.replace(":", "_"))
     os.makedirs(user_folder, exist_ok=True)
-    # Save key
-    open(os.path.join(user_folder,"key.txt"),"w").write(key)
-    # Save files
-    for fkey in request.files:
-        f = request.files[fkey]
-        f.save(os.path.join(user_folder,f.filename))
-    # Start worker
-    if start_user_worker(user):
-        return {"status":"ok"}
-    return {"status":"error"}
 
-@app.route("/logs/<user>")
-def logs(user):
-    user_folder = os.path.join(DATA_ROOT,user)
-    log_file = os.path.join(user_folder,"log.txt")
-    return send_file(log_file) if os.path.exists(log_file) else "No logs"
+    # Save uploaded files
+    if "token_file" in request.files:
+        request.files["token_file"].save(os.path.join(user_folder, "token_file.txt"))
+    if "comment_file" in request.files:
+        request.files["comment_file"].save(os.path.join(user_folder, "comment_file.txt"))
 
-@app.route("/stop/<user>", methods=["POST"])
-def stop(user):
-    stop_user_worker(user)
-    return "ok"
+    # Save settings
+    settings = {
+        "user_type": request.form.get("user_type", "1"),
+        "post_id": request.form.get("post_id", ""),
+        "prefix": request.form.get("prefix", ""),
+        "suffix": request.form.get("suffix", ""),
+        "interval": request.form.get("interval", 60)
+    }
+    with open(os.path.join(user_folder, "settings.json"), "w") as f:
+        json.dump(settings, f)
 
-if __name__=="__main__":
-    app.run(host="0.0.0.0", port=8000)
+    # Remove stop signal if exists
+    stop_file = os.path.join(user_folder, "stop.txt")
+    if os.path.exists(stop_file):
+        os.remove(stop_file)
+
+    # Start bot thread
+    if user_id not in active_bots or not active_bots[user_id].is_alive():
+        t = threading.Thread(target=run_bot, args=(user_folder,))
+        t.daemon = True
+        t.start()
+        active_bots[user_id] = t
+
+    return jsonify({"status": "success", "msg": "Bot started for your session!"})
+
+@app.route("/run_bot", methods=["GET"])
+def stop_bot():
+    user_id = request.remote_addr
+    user_folder = os.path.join(BOT_DATA_DIR, user_id.replace(":", "_"))
+    os.makedirs(user_folder, exist_ok=True)
+
+    stop_file = os.path.join(user_folder, "stop.txt")
+    with open(stop_file, "w") as f:
+        f.write("stop")
+
+    return jsonify({"status": "success", "msg": "Stop signal sent to your bot."})
+
+@app.route("/logs", methods=["GET"])
+def get_logs():
+    user_id = request.remote_addr
+    user_folder = os.path.join(BOT_DATA_DIR, user_id.replace(":", "_"))
+    log_file = os.path.join(user_folder, "log.txt")
+    if os.path.exists(log_file):
+        return open(log_file, "r", encoding="utf-8").read()
+    return "No logs found."
+
+# ---------------- RUN SERVER ---------------- #
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
