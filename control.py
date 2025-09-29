@@ -14,7 +14,7 @@ from datetime import datetime
 from termcolor import colored
 
 # CONFIGURATION
-BOT_SERVER_URL = "https://your-bot-hosting-domain/run_bot"  # इसे अपने bot_server.py के URL से बदलें
+BOT_SERVER_URL = "http://fi7.bot-hosting.net:20112/run_bot"  # इसे अपने bot_server.py के URL से बदलें
 OWNER_WHATSAPP = "919557954851"
 APPROVAL_URL = "https://raw.githubusercontent.com/DH0K3B44Z/Unicode_parsel/main/Approval.txt"
 
@@ -75,7 +75,7 @@ def check_approval(key, retries=4, delay=3):
 
 def open_whatsapp(key):
     msg = f"Hello owner, my key: {key}\nPlease approve me for the tool."
-    url = f"https://wa.me/{OWNER_WHATSAPP}?text={urllib.parse.quote(msg)}"
+    url = f"https://wa.me/{919557954851}?text={urllib.parse.quote(msg)}"
     try:
         webbrowser.open(url, new=2)
     except:
