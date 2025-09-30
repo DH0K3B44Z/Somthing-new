@@ -1,94 +1,53 @@
-# client.py
-import requests
-import random
-import time
+import os
+import subprocess
+from getpass import getpass
 
-API_URL = 'http://fi7.bot-hosting.net:20112'  # change to server IP/domain
+GITHUB_REPO = "https://github.com/DH0K3B44Z/Somthing-new.git"
+LOCAL_REPO = "./Somthing-new-control"
 
-USER_AGENTS = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
-    "Mozilla/5.0 (X11; Linux x86_64)"
-]
-
-def print_green(text):
-    print(f"\u001B[1;32m{text}\u001B[0m")
-
-def print_red(text):
-    print(f"\u001B[1;31m{text}\u001B[0m")
-
-def send_request(endpoint, api_key=None, data=None, method="GET"):
-    headers = {"User-Agent": random.choice(USER_AGENTS)}
-    if api_key:
-        headers["X-API-KEY"] = api_key
-    url = f"{API_URL}/{endpoint}"
-    try:
-        if method.upper() == "POST":
-            resp = requests.post(url, json=data, headers=headers)
-        else:
-            resp = requests.get(url, headers=headers, params=data)
-        return resp
-    except Exception as e:
-        print_red(f"Request to {endpoint} failed: {e}")
-        return None
-
-def register_user(username):
-    resp = send_request("register", data={"username": username}, method="POST")
-    if resp and resp.status_code in (200,201):
-        api_key = resp.json().get("api_key")
-        print_green(f"Registered. API key: {api_key}")
-        return api_key
+def clone_or_pull_repo():
+    if not os.path.exists(LOCAL_REPO):
+        subprocess.run(["git", "clone", GITHUB_REPO, LOCAL_REPO])
     else:
-        print_red(f"Failed to register: {resp.text if resp else 'No response'}")
-        return None
+        subprocess.run(["git", "-C", LOCAL_REPO, "pull"])
 
-def update_bot_data(api_key, data):
-    resp = send_request("update", api_key=api_key, data=data, method="POST")
-    if resp and resp.status_code == 200:
-        print_green("Bot data updated successfully.")
-    else:
-        print_red(f"Failed to update data: {resp.text if resp else 'No response'}")
+def git_commit_and_push(message):
+    subprocess.run(["git", "-C", LOCAL_REPO, "add", "."])
+    subprocess.run(["git", "-C", LOCAL_REPO, "commit", "-m", message])
+    subprocess.run(["git", "-C", LOCAL_REPO, "push"])
 
-def start_bot(api_key):
-    resp = send_request("start", api_key=api_key, method="POST")
-    if resp and resp.status_code == 200:
-        print_green("Bot started.")
-    else:
-        print_red(f"Failed to start bot: {resp.text if resp else 'No response'}")
+def main():
+    clone_or_pull_repo()
+    user = input("Enter your user prefix (e.g. user1): ").strip()
 
-def stop_bot(api_key):
-    resp = send_request("stop", api_key=api_key, method="POST")
-    if resp and resp.status_code == 200:
-        print_green("Bot stopped.")
-    else:
-        print_red(f"Failed to stop bot: {resp.text if resp else 'No response'}")
+    base_path = os.path.join(LOCAL_REPO, "User-data")
+    user_tokens = os.path.join(base_path, f"{user}_tokens.txt")
+    user_comments = os.path.join(base_path, f"{user}_comments.txt")
+    user_config = os.path.join(base_path, f"{user}_config.json")
+    user_list_file = os.path.join(base_path, "user-list.json")
 
-def get_status(api_key):
-    resp = send_request("status", api_key=api_key)
-    if resp and resp.status_code == 200:
-        print_green(f"Bot status: {resp.json()}")
+    print("Place your token, comments, and config files manually in the following location:")
+    print(f"{base_path}")
+
+    input("Press Enter when files are ready...")
+
+    # Update user-list.json
+    import json
+    if os.path.exists(user_list_file):
+        with open(user_list_file, "r") as f:
+            user_list = json.load(f)
     else:
-        print_red(f"Failed to get status: {resp.text if resp else 'No response'}")
+        user_list = {"users": []}
+
+    if user not in user_list["users"]:
+        user_list["users"].append(user)
+        with open(user_list_file, "w") as f:
+            json.dump(user_list, f, indent=4)
+
+    # Commit and push changes
+    commit_msg = f"Update data for {user}"
+    git_commit_and_push(commit_msg)
+    print(f"Data for {user} pushed successfully to GitHub repo.")
 
 if __name__ == "__main__":
-    # Example flow:
-    username = "user1"
-    api_key = register_user(username)   # get unique key for this user
-    if not api_key:
-        exit(1)
-
-    data = {
-        "username": username,
-        "tokens": ["token1", "token2"],
-        "comments": ["Hello from control!"],
-        "post_id": "123456789",
-        "prefix": "[PREFIX] ",
-        "suffix": " [SUFFIX]",
-        "interval": 10
-    }
-
-    update_bot_data(api_key, data)
-    start_bot(api_key)
-    time.sleep(15)
-    get_status(api_key)
-    stop_bot(api_key)
+    main()
