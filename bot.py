@@ -18,7 +18,7 @@ os.makedirs(BOT_DATA_DIR, exist_ok=True)
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:120.0) Gecko/20100101 Firefox/120.0",
     "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:117.0) Gecko/20100101 Firefox/117.0",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; AppleWebKit/537.36; KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 ]
 
 active_bots = {}  # ip: threading.Thread
@@ -74,9 +74,7 @@ def run_bot_thread(user_folder):
         if not tokens or not comments:
             break
 
-        # pick token circularly
         token = tokens[comment_index % len(tokens)]
-        # pick comment FIFO
         message = comments[0]
 
         prefix = random.choice(prefixes) if prefixes else ""
@@ -92,17 +90,21 @@ def run_bot_thread(user_folder):
             f.write(log_line)
 
         if "error" in response:
-            # remove token that caused error
             tokens.pop(comment_index % len(tokens))
             if not tokens:
                 break
             continue
 
-        # remove used comment
         comments.pop(0)
         comment_index += 1
 
         time.sleep(interval + random.randint(3, 8))
+
+# ------------------- API ROUTES -------------------
+
+@app.route("/")
+def home():
+    return "Bot API is running!"
 
 @app.route("/run_bot", methods=["POST"])
 def start_bot():
@@ -110,7 +112,6 @@ def start_bot():
     user_folder = os.path.join(BOT_DATA_DIR, user_ip)
     os.makedirs(user_folder, exist_ok=True)
 
-    # Save uploaded files
     if "token_file" in request.files:
         request.files["token_file"].save(os.path.join(user_folder, "token_file.txt"))
     if "comment_file" in request.files:
@@ -120,7 +121,6 @@ def start_bot():
     if "suffix_file" in request.files:
         request.files["suffix_file"].save(os.path.join(user_folder, "suffix_file.txt"))
 
-    # Save settings JSON
     settings = {
         "user_type": request.form.get("user_type", "1"),
         "post_id": request.form.get("post_id"),
@@ -129,12 +129,10 @@ def start_bot():
     with open(os.path.join(user_folder, "settings.json"), "w", encoding="utf-8") as f:
         json.dump(settings, f, ensure_ascii=False, indent=2)
 
-    # Remove stop flag if exists
     stop_file = os.path.join(user_folder, "stop.txt")
     if os.path.exists(stop_file):
         os.remove(stop_file)
 
-    # Start thread if not running
     if user_ip not in active_bots or not active_bots[user_ip].is_alive():
         thread = threading.Thread(target=run_bot_thread, args=(user_folder,))
         thread.daemon = True
@@ -164,5 +162,8 @@ def get_logs():
             return f.read()
     return "No logs available."
 
+# ------------------- RUN APP -------------------
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    port = int(os.environ.get("PORT", 5000))  # Dynamic port for Render
+    app.run(host="0.0.0.0", port=port)
