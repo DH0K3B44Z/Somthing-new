@@ -3,7 +3,7 @@ import requests
 import random
 import time
 
-API_URL = 'http://127.0.0.1:5000'  # change to server IP/domain
+API_URL = 'fi7.bot-hosting.net:20112'  # change to server IP/domain
 
 USER_AGENTS = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
