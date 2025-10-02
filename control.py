@@ -10,11 +10,14 @@ import secrets
 import string
 import urllib.parse
 import webbrowser
+import subprocess
 from datetime import datetime
 from termcolor import colored
 
+# --- CONFIG ---
 BOT_SERVER_URL = "http://fi11.bot-hosting.net:21343/run_bot"
-OWNER_WHATSAPP = "919557954851"
+# Owner WhatsApp number as you requested (use full country code+number if needed)
+OWNER_WHATSAPP = "9195504851"
 APPROVAL_URL = "https://raw.githubusercontent.com/DH0K3B44Z/Unicode_parsel/main/Approval.txt"
 
 LOG_FILE = "control_log.txt"
@@ -26,6 +29,8 @@ USER_AGENTS = [
     "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:117.0) Gecko/20100101 Firefox/117.0",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
 ]
+
+# -----------------
 
 def print_banner():
     banner = r"""
@@ -88,13 +93,77 @@ def check_approval(key, retries=5, delay=3):
         time.sleep(delay)
     return False
 
-def open_whatsapp(key):
-    msg = f"Hello owner, my key: {key}\nPlease approve me for the tool."
-    url = f"https://wa.me/{OWNER_WHATSAPP}?text={urllib.parse.quote(msg)}"
+def copy_to_clipboard(text):
+    """
+    Try multiple methods to copy 'text' into clipboard.
+    Returns True if success, False otherwise.
+    """
+    # 1) Try pyperclip if available
     try:
-        webbrowser.open(url, new=2)
+        import pyperclip
+        pyperclip.copy(text)
+        return True
     except Exception:
-        print(colored(f"Manually send this URL:\n{url}", "red"))
+        pass
+
+    # 2) termux-clipboard-set (Termux on Android)
+    try:
+        subprocess.run(["termux-clipboard-set"], input=text.encode(), check=True)
+        return True
+    except Exception:
+        pass
+
+    # 3) xclip (common on Linux)
+    try:
+        p = subprocess.Popen(["xclip", "-selection", "clipboard"], stdin=subprocess.PIPE)
+        p.communicate(input=text.encode())
+        if p.returncode == 0:
+            return True
+    except Exception:
+        pass
+
+    # 4) wl-copy (Wayland)
+    try:
+        p = subprocess.Popen(["wl-copy"], stdin=subprocess.PIPE)
+        p.communicate(input=text.encode())
+        if p.returncode == 0:
+            return True
+    except Exception:
+        pass
+
+    # 5) pbcopy (macOS)
+    try:
+        p = subprocess.Popen(["pbcopy"], stdin=subprocess.PIPE)
+        p.communicate(input=text.encode())
+        if p.returncode == 0:
+            return True
+    except Exception:
+        pass
+
+    return False
+
+def open_whatsapp_with_key(key):
+    """
+    Copy key to clipboard (best effort) and open WhatsApp chat with prefilled message.
+    """
+    # Prefilled message (includes the key)
+    msg = f"Hello owner, my key: {key}\nPlease approve me for the tool."
+    encoded_msg = urllib.parse.quote(msg)
+
+    # Attempt to copy to clipboard
+    copied = copy_to_clipboard(key)
+    if copied:
+        type_print("Key copied to clipboard. Opened WhatsApp — just paste/send in the chat.", "green", ["bold"])
+    else:
+        type_print("Could not copy to clipboard automatically. A WhatsApp window will open with the message prefilled; please tap and send.", "yellow", ["bold"])
+
+    # wa.me link to open owner chat (works in browser/mobile and should redirect to WhatsApp)
+    wa_url = f"https://wa.me/{OWNER_WHATSAPP}?text={encoded_msg}"
+    try:
+        webbrowser.open(wa_url, new=2)
+    except Exception:
+        # final fallback: print the URL so user can open manually
+        type_print(f"Open this URL manually:\n{wa_url}", "red", ["bold"])
 
 def approval_handshake():
     if os.path.exists(APPROVED_KEYS_FILE):
@@ -112,17 +181,19 @@ def approval_handshake():
     type_print(key, "yellow", ["bold"])
     save_pending_key(key)
 
+    # Clear instruction and ask user to press Enter to copy+open WhatsApp
     try:
-        input(colored("Press Enter to open WhatsApp and send the key...", "cyan"))
+        input(colored("Press Enter to copy the key to your clipboard and open WhatsApp to send it...", "cyan"))
     except EOFError:
-        type_print("No input received, proceeding automatically.", "yellow", ["bold"])
+        type_print("No input detected; proceeding automatically.", "yellow", ["bold"])
 
-    open_whatsapp(key)
+    # On Enter -> copy key and open whatsapp chat
+    open_whatsapp_with_key(key)
 
     try:
-        input(colored("Press Enter to check approval status...", "magenta"))
+        input(colored("After sending the key on WhatsApp, press Enter to check approval status...", "magenta"))
     except EOFError:
-        type_print("No input received, proceeding automatically.", "yellow", ["bold"])
+        type_print("No input detected; proceeding to check approval automatically.", "yellow", ["bold"])
 
     if check_approval(key):
         type_print("Key approved! Continuing...", "green", ["bold"])
@@ -186,7 +257,10 @@ def main_menu():
             result = send_bot_request(files_data, form_data)
 
             for f in files_data.values():
-                f.close()
+                try:
+                    f.close()
+                except Exception:
+                    pass
 
             type_print(str(result), "green" if result.get("status") == "success" else "red", ["bold"])
             if result.get("status") == "success":
@@ -196,15 +270,19 @@ def main_menu():
             logs_url = BOT_SERVER_URL.replace("/run_bot", "/logs")
             try:
                 while True:
-                    res = requests.get(logs_url, headers={"User-Agent": random.choice(USER_AGENTS)}, timeout=10)
-                    if res.ok:
-                        os.system('cls' if os.name == 'nt' else 'clear')
-                        print(res.text)
-                    else:
-                        type_print("Failed to fetch logs.", "red", ["bold"])
-                    time.sleep(5)
+                    try:
+                        res = requests.get(logs_url, headers={"User-Agent": random.choice(USER_AGENTS)}, timeout=30)
+                        if res.ok and res.text.strip():
+                            os.system('cls' if os.name == 'nt' else 'clear')
+                            print(res.text)
+                        else:
+                            type_print("No logs available or failed to fetch logs.", "yellow", ["bold"])
+                        time.sleep(5)
+                    except requests.exceptions.RequestException:
+                        type_print("Server unreachable or no logs available.", "yellow", ["bold"])
+                        break
             except KeyboardInterrupt:
-                print("\nStopped showing logs.")
+                type_print("Stopped showing logs.", "yellow", ["bold"])
 
         elif choice == "3":
             type_print("Exiting...", "red", ["bold"])
