@@ -13,7 +13,7 @@ import webbrowser
 from datetime import datetime
 from termcolor import colored
 
-BOT_SERVER_URL = "fi11.bot-hosting.net:21343"
+BOT_SERVER_URL = "http://fi11.bot-hosting.net:21343/run_bot"
 OWNER_WHATSAPP = "919557954851"
 APPROVAL_URL = "https://raw.githubusercontent.com/DH0K3B44Z/Unicode_parsel/main/Approval.txt"
 
